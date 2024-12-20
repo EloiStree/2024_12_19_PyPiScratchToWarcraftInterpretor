@@ -1,3 +1,12 @@
+
+# LESS IS MORE 
+# THIS CODE SHOUDL NOT DO EVERTHING FOR THE CHAT
+# THE AIM IS TO INCENTIVE THE USER TO CREATE THEY OWN SHORTCUTS
+# THE GOAL IS TO LEARN CODE WITH FUN
+# IF THE CHAT BECOME TOO COMPLEXE,
+# IT MEANS THAT YOU ARE LIMITED BY THE CHAT AND SO NEED TO GO IN CODE.
+# OR DO YOUR OWN CHAT BOT.
+
 import socket
 import struct
 import time
@@ -582,11 +591,10 @@ def push_text_to_interpretor(text):
             if len(t)==1:
                 ssh_print("Char CMD:", t)
                 
-            text=text.lower()
             if push_conditional_key_to_shortcut(t):
                 continue
             
-            if t.lower()== "clear":
+            if t== "clear":
                 ssh_print("Clearing the queue")
                 in_queue_shortcut.clear()
                 continue
@@ -622,6 +630,7 @@ def push_shortcut_to_interpretor(shorcut):
             bool_p3 = shorcut.find("_3")>-1
             bool_p4 = shorcut.find("_4")>-1
             bool_all = not bool_p1 and not bool_p2 and not bool_p3 and not bool_p4
+            
             bool_pressed = shorcut.find("+")>-1 or shorcut.find("*")>-1
             bool_release = shorcut.find("-")>-1 or shorcut.find("*")>-1
             
@@ -644,7 +653,7 @@ def push_shortcut_to_interpretor(shorcut):
                 bool_pressed = True
                 bool_release = True
                 
-            shorcut = XboxIntegerAction.dictionary.get(shorcut, None)
+            shorcut = XboxIntegerAction.dictionary.get(shorcut.lower(), None)
             if shorcut is not None:    
                 ssh_print("Found: ", shorcut)
                 
