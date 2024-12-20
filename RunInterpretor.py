@@ -7,7 +7,14 @@ import threading
 import os
 
 
-BOOL_USE_PRINT = False
+bool_ban_menu_xbox_left=True
+bool_ban_menu_xbox_right=False
+
+
+int_index_allowed_min=0
+int_index_allowed_max=4
+
+BOOL_USE_PRINT = True
 def is_ssh():
     return "SSH_CONNECTION" in os.environ or "SSH_TTY" in os.environ
 
@@ -15,7 +22,6 @@ def ssh_print(text, *args):
     if BOOL_USE_PRINT:
         print(text, *args)
 BOOL_USE_PRINT = is_ssh()
-
 
 # IF YOU  WANT TO LISTEN TO THE WORLD
 LISTEN_TEXT_IPV4 = "0.0.0.0"
@@ -28,8 +34,11 @@ SERVER_UDP_IPV4 = "127.0.0.1"
 LISTEN_TEXT_PORT = 3614
 SERVER_UDP_PORT = 3615
 
+bool_use_print= False
 
-
+def ssh_print(text, *args):
+    if bool_use_print:
+        print(text, *args)
 
 # sudo nano /lib/systemd/system/scratch_to_warcraft_interpretor.service
 """
@@ -78,22 +87,123 @@ WantedBy=timers.target
 # sudo systemctl list-timers | grep scratch_to_warcraft_interpretor
 
 
+# The code use a listen port and can't work with two instances at the same time.
+#># sudo systemctl stop scratch_to_warcraft_interpretor.timer
+#># sudo systemctl stop scratch_to_warcraft_interpretor.service
+
+#># sudo systemctl start scratch_to_warcraft_interpretor.timer
+#># sudo systemctl start scratch_to_warcraft_interpretor.service
+
+
+
+def get_time_in_milliseconds():
+    return time.time() * 1000
+
+CURRENT_TIME = get_time_in_milliseconds()
+
+
+
+class WaitingShortcut:
+    def __init__(self, shortcut, time_in_milliseconds, delay_in_milliseconds ):
+        self.shortcut_text = shortcut
+        self.local_time_created = time_in_milliseconds
+        self.local_time_to_execute = time_in_milliseconds + delay_in_milliseconds
+    
+    def is_ready(self, current_time):
+        return current_time >= self.local_time_to_execute
+   
+    def get_shortcut(self): 
+        return self.shortcut_text
+
+
+class QueueOfShortcuts:
+    def __init__(self):
+        self.list = list()
+        
+    def append_at_0(self, shortcut):
+        self.list.insert(0, shortcut)
+    
+    def has_waiting_shortcut(self):
+        return len(self.list)>0
+    
+    def check_for_shortcut_to_extract(self, current_time):
+        list_result = list()
+        int_index= len(self.list)-1
+        while int_index>=0:
+            shortcut = self.list[int_index]
+            if shortcut.is_ready(current_time):
+                list_result.append(shortcut)
+                self.list.pop(int_index)
+            int_index-=1
+            
+        return list_result
+
+    def clear (self):
+        self.list.clear()
+
+
+in_queue_shortcut = QueueOfShortcuts()
+
+def push_shortcut_to_queue(shortcut_text, delay_in_milliseconds):
+    in_queue_shortcut.append_at_0(WaitingShortcut(shortcut_text, get_time_in_milliseconds(), delay_in_milliseconds))
+
+
+def push_shortcut_to_queue_at_localTime(shortcut_text, time_in_milliseconds, delay_in_milliseconds):
+    in_queue_shortcut.append_at_0(WaitingShortcut(shortcut_text, time_in_milliseconds, delay_in_milliseconds))
+
+
+
+def check_the_queue_for_shortcuts():
+    if not in_queue_shortcut.has_waiting_shortcut():
+        return
+    
+    global CURRENT_TIME
+    CURRENT_TIME = get_time_in_milliseconds()
+    for s in in_queue_shortcut.check_for_shortcut_to_extract(CURRENT_TIME):
+        ssh_print("Shortcut delayed: ", s.get_shortcut())
+        push_text_to_interpretor(s.get_shortcut())
+
+def is_integer_ban(integer):
+    if bool_ban_menu_xbox_left and integer==XboxIntegerAction.press_menu_left:
+        return True
+    if bool_ban_menu_xbox_left and integer==XboxIntegerAction.press_menu_left+1000:
+        return True
+    if bool_ban_menu_xbox_right and integer==XboxIntegerAction.press_menu_right:
+        return True
+    if bool_ban_menu_xbox_right and integer==XboxIntegerAction.press_menu_right+1000:
+        return True
+    return False
+
+def is_index_ban(index):
+    if index<int_index_allowed_min:
+        return True
+    if index>int_index_allowed_max:
+        return True
+    return False
 
 
 def send_udp_integer(integer):
+    
+    if is_integer_ban(integer):
+        return
+    
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     message = struct.pack("<i", integer)
     sock.sendto(message, (SERVER_UDP_IPV4,SERVER_UDP_PORT))
     sock.close()
-    print("Sent: ", integer)
+    ssh_print("Sent: ", integer)
 
 
 def send_udp_index_integer( index, integer):
+    if is_integer_ban(integer):
+        return
+    if is_index_ban(index):
+        return
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     message = struct.pack("<ii", index, integer)
     sock.sendto(message, (SERVER_UDP_IPV4,SERVER_UDP_PORT))
     sock.close()
-    print("Sent: ", index, integer)
+    ssh_print("Sent: ", index, integer)
     
 def i(int_value):
     send_udp_integer(int_value)
@@ -123,24 +233,22 @@ def ii_r(index, value):
 step_time = 0.5
 def push_all_debug(text, press_integer):
     
-    print("Release:", text)
+    ssh_print("Release:", text)
     i(press_integer)
     time.sleep(step_time)
-    print("Release:", text)
+    ssh_print("Release:", text)
     i(press_integer+1000)
     time.sleep(step_time)
 
-
- 
 class StringLinkToInteger:
     def __init__(self, string_id, integer_id):
         self.string_id = string_id
         self.integer_id = integer_id
-        
   
 class XboxIntegerAction:
-    
             random_input =  1399
+            release_all =  1390
+            release_all_but_menu =  1391
             press_a =  1300
             press_x =  1301
             press_b =  1302
@@ -305,15 +413,22 @@ class XboxIntegerAction:
             dictionary["set_right_stick_vertical_025"] =  set_right_stick_vertical_025
             dictionary["set_right_stick_vertical_neg_025"] =  set_right_stick_vertical_neg_025
             
+            dictionary["release"]= release_all_but_menu
+            dictionary["off"] = release_all_but_menu
             dictionary["r"] =  random_input
             dictionary["a"] =  press_a
             dictionary["x"] =  press_x
             dictionary["b"] =  press_b
             dictionary["y"] =  press_y
+            #!s sbr+ 80> sbr- 1000> sbr+ 80> sbr- 1000>  sbr+ 80> sbr- 1000> 
             dictionary["slb"] =  press_left_side_button
             dictionary["srb"] =  press_right_side_button
+            dictionary["sbl"] =  press_left_side_button
+            dictionary["sbr"] =  press_right_side_button
             dictionary["ls"] =  press_left_stick
+            dictionary["sl"] =  press_left_stick
             dictionary["rs"] =  press_right_stick
+            dictionary["sr"] =  press_right_stick
             dictionary["mr"] =  press_menu_right
             dictionary["ml"] =  press_menu_left
             dictionary["ac"] =  release_dpad
@@ -331,22 +446,40 @@ class XboxIntegerAction:
             dictionary["jlc"] =  set_left_stick_neutral
             dictionary["jln"] =  set_left_stick_up
             dictionary["jlne"] =  set_left_stick_up_right
+            dictionary["jlen"] =  set_left_stick_up_right
+            
             dictionary["jle"] =  set_left_stick_right
             dictionary["jlse"] =  set_left_stick_down_right
+            dictionary["jles"] =  set_left_stick_down_right
             dictionary["jls"] =  set_left_stick_down
             dictionary["jlsw"] =  set_left_stick_down_left
+            dictionary["jlws"] =  set_left_stick_down_left
             dictionary["jlw"] =  set_left_stick_left
             dictionary["jlnw"] =  set_left_stick_up_left
+            dictionary["jlwn"] =  set_left_stick_up_left
             dictionary["jrc"] =  set_right_stick_neutral
             dictionary["jrn"] =  set_right_stick_up
             dictionary["jrne"] =  set_right_stick_up_right
+            dictionary["jren"] =  set_right_stick_up_right
             dictionary["jre"] =  set_right_stick_right
             dictionary["jrse"] =  set_right_stick_down_right
+            dictionary["jres"] =  set_right_stick_down_right
             dictionary["jrs"] =  set_right_stick_down
-            dictionary["jrsx"] =  set_right_stick_down_left
+            dictionary["jrsw"] =  set_right_stick_down_left
+            dictionary["jrws"] =  set_right_stick_down_left
             dictionary["jrw"] =  set_right_stick_left
             dictionary["jrnw"] =  set_right_stick_up_left
+            dictionary["jrwn"] =  set_right_stick_up_left
+
             
+            # Steath Bastar
+            # dictionary["left"] =  set_left_stick_left
+            # dictionary["right"] =  set_left_stick_down
+            # dictionary["down"] =  set_left_stick_down
+            # dictionary["up"] =  set_left_stick_up
+            # dictionary["jump"] =  press_a
+            # dictionary["crouch"] =  press_b
+            # dictionary["release"] = 1399
             
             dictionary["jlh+100"]=set_left_stick_horizontal_100
             dictionary["jlh-100"]=set_left_stick_horizontal_neg_100
@@ -437,78 +570,185 @@ def select_character():
             
 
 def push_text_to_interpretor(text):
-        #print ("Humm: ", text)
+        time= get_time_in_milliseconds()
+        delay=0 
+        print (f"Humm: ({text})")
         #print ("------------------------------: ")
-        text =text.lower()
+        
         tokens = text.split(" ")
-        #print("Tokens: ", tokens)
+        ssh_print("Tokens: ", tokens)
         for t in tokens:
             
-            #print ("############ ")
-            #print("\n\n\nToken: ", t)
-            try:
-                int_value = int(t)
-                print("Found: ", int_value)
-                i(int_value)
+            if len(t)==1:
+                ssh_print("Char CMD:", t)
+                
+            text=text.lower()
+            if push_conditional_key_to_shortcut(t):
                 continue
+            
+            if t.lower()== "clear":
+                ssh_print("Clearing the queue")
+                in_queue_shortcut.clear()
+                continue
+            if t.endswith(">"):
+                t= t.replace(">", "")
+                try :
+                    int_ms = int(t)
+                    delay += int_ms
+                except ValueError:
+                    continue
+                ssh_print("Delay: ", t)
+                continue
+            else:
+                if delay==0:
+                    push_shortcut_to_interpretor(t)
+                else :
+                    push_shortcut_to_queue_at_localTime(t, time, delay)
+            
+    
+def push_shortcut_to_interpretor(shorcut):
+            ssh_print("Executing: ", shorcut)
+            #print ("############ ")
+            #ssh_print("\n\n\nToken: ", t)
+            try:
+                int_value = int(shorcut)
+                ssh_print("Found: ", int_value)
+                i(int_value)
             except ValueError:
                 pass
             
-            bool_p1 = t.find("_1")>-1
-            bool_p2 = t.find("_2")>-1
-            bool_p3 = t.find("_3")>-1
-            bool_p4 = t.find("_4")>-1
+            bool_p1 = shorcut.find("_1")>-1
+            bool_p2 = shorcut.find("_2")>-1
+            bool_p3 = shorcut.find("_3")>-1
+            bool_p4 = shorcut.find("_4")>-1
             bool_all = not bool_p1 and not bool_p2 and not bool_p3 and not bool_p4
-            bool_pressed = t.find("+")>-1 or t.find("*")>-1
-            bool_release = t.find("-")>-1 or t.find("*")>-1
+            bool_pressed = shorcut.find("+")>-1 or shorcut.find("*")>-1
+            bool_release = shorcut.find("-")>-1 or shorcut.find("*")>-1
             
             #print (f"PR: {bool_pressed},{bool_release}")
     
-            t= t.replace("+", "")
-            t= t.replace("-", "")
-            t= t.replace("*", "")
+            shorcut= shorcut.replace("+", "")
+            shorcut= shorcut.replace("-", "")
+            shorcut= shorcut.replace("*", "")
             if bool_p1:
-                t = t.replace("_1", "")
+                shorcut = shorcut.replace("_1", "")
             if bool_p2:
-                t = t.replace("_2", "")
+                shorcut = shorcut.replace("_2", "")
             if bool_p3:
-                t = t.replace("_3", "")
+                shorcut = shorcut.replace("_3", "")
             if bool_p4:
-                t = t.replace("_4", "")
+                shorcut = shorcut.replace("_4", "")
             
             
             if not bool_pressed and not bool_release:
                 bool_pressed = True
                 bool_release = True
                 
-            t = XboxIntegerAction.dictionary.get(t, None)
-            if t is not None:    
-                print("Found: ", t)
+            shorcut = XboxIntegerAction.dictionary.get(shorcut, None)
+            if shorcut is not None:    
+                ssh_print("Found: ", shorcut)
                 
                 if bool_pressed:
                     if bool_all:
-                        i(t)
+                        i(shorcut)
                     else :
                         if bool_p1:
-                            ii(1, t)
+                            ii(1, shorcut)
                         if bool_p2:
-                            ii(2, t)
+                            ii(2, shorcut)
                         if bool_p3:
-                            ii(3, t)
+                            ii(3, shorcut)
                         if bool_p4:
-                            ii(4, t)
+                            ii(4, shorcut)
                 if bool_release:
                     if bool_all:
-                        i(t+1000)
+                        i(shorcut+1000)
                     else :
                         if bool_p1:
-                            ii(1, t+1000)
+                            ii(1, shorcut+1000)
                         if bool_p2:
-                            ii(2, t+1000)
+                            ii(2, shorcut+1000)
                         if bool_p3:
-                            ii(3, t+1000)
+                            ii(3, shorcut+1000)
                         if bool_p4:
-                            ii(4, t+1000)
+                            ii(4, shorcut+1000)
+                            
+                            
+
+dico_key_to_shortcut = {}
+dico_key_to_shortcut["z"] = "jlu+ 200> jlu-"
+dico_key_to_shortcut["i"] = "jlu+ 200> jlu-"
+dico_key_to_shortcut["s"] = "jld+ 200> jld-"
+dico_key_to_shortcut["k"] = "jld+ 200> jld-"
+dico_key_to_shortcut["q"] = "jll+ 200> jll-"
+dico_key_to_shortcut["j"] = "jll+ 200> jll-"
+dico_key_to_shortcut["d"] = "jlr+ 200> jlr-"
+dico_key_to_shortcut["l"] = "jlr+ 200> jlr-"
+dico_key_to_shortcut["e"] = "R1+ 200> R1-"
+dico_key_to_shortcut["o"] = "R1+ 200> R1-"
+dico_key_to_shortcut["i"] = "a"
+dico_key_to_shortcut["w"] = ""
+dico_key_to_shortcut["c"] = ""
+dico_key_to_shortcut["r"] = "sbl+ 200> sbl-"
+dico_key_to_shortcut["f"] = "sbr+ 200> sbr-"
+
+dico_key_to_shortcut["Z"] = "jlu+ 50> jlu-"
+dico_key_to_shortcut["S"] = "jld+ 50> jld-"
+dico_key_to_shortcut["Q"] = "jll+ 50> jll-"
+dico_key_to_shortcut["D"] = "jlr+ 50> jlr-"
+dico_key_to_shortcut["E"] = "R1+ 50> R1-"
+dico_key_to_shortcut["W"] = ""
+dico_key_to_shortcut["C"] = ""
+dico_key_to_shortcut["R"] = "sbl+ 50> sbl-"
+dico_key_to_shortcut["F"] = "sbr+ 50> sbr-"
+
+dico_key_to_shortcut["roll"] = "B+ 100> B-"
+dico_key_to_shortcut["attack"] = "sbr+ 100> sbr-"
+
+dico_key_to_shortcut["è"]  = "A+ 100> A-"
+dico_key_to_shortcut["7"]  = "A+ 100> A-"
+dico_key_to_shortcut["!"]  = "X+ 100> X-"
+dico_key_to_shortcut["8"]  = "X+ 100> X-"
+dico_key_to_shortcut["ç"]  = "B+ 100> B-"
+dico_key_to_shortcut["9"]  = "B+ 100> B-"
+dico_key_to_shortcut["à"]  = "y+ 100> Y-"
+dico_key_to_shortcut["0"]  = "y+ 100> Y-"
+
+dico_key_to_shortcut["&"]  = "au+ 100> au-"
+dico_key_to_shortcut["1"]  = "ad+ 100> ad-"
+dico_key_to_shortcut["é"]  = "al+ 100> al-"
+dico_key_to_shortcut["é"]  = "al+ 100> al-"
+dico_key_to_shortcut["\""] = "ar+ 100> ar-"
+dico_key_to_shortcut["3"] = "ar+ 100> ar-"
+dico_key_to_shortcut["'"]  = "ad+ 100> ad-"
+dico_key_to_shortcut["4"]  = "ad+ 100> ad-"
+
+
+dico_key_to_shortcut["("] = "jl+ 100> jl-"
+dico_key_to_shortcut["5"] = "jl+ 100> jl-"
+dico_key_to_shortcut["§"] = "jr+ 100> jr-"
+dico_key_to_shortcut["6"] = "jl+ 100> jl-"
+
+dico_key_to_shortcut["è"] = "sbl+ 100> sbl-"
+dico_key_to_shortcut["!"] = "sbr2+ 100> sbr-"
+
+#Clear
+dico_key_to_shortcut["c"] = "clear+ 100> clear-"
+dico_key_to_shortcut["clear"] = "clear+ 100> clear-"
+
+#Release
+dico_key_to_shortcut["r"] = "clear+ 100> clear-"
+dico_key_to_shortcut["release"] = "clear+ 100> clear-"
+                   
+                            
+def push_conditional_key_to_shortcut(text):
+    shortcut = dico_key_to_shortcut.get(text, None)
+    if shortcut is not None:
+        push_text_to_interpretor(shortcut)
+        return True
+    return False
+
+                            
 import random                           
 if __name__ == "__main__":
     
@@ -546,111 +786,9 @@ if __name__ == "__main__":
         
     
     while True:
-        print(".")
-        time.sleep(10)
+        check_the_queue_for_shortcuts()
+        time.sleep(1)
     
-    bool_loop = False
-    if bool_loop:
-        while True:
-            a =1
-            #push_all_debug("Xbox Home Button", 1319)
-            push_all_debug("Left Stick", XboxIntegerAction.press_left_stick)
-            push_all_debug("Right Stick", XboxIntegerAction.press_right_stick)
-            push_all_debug("Menu Right", XboxIntegerAction.press_menu_right)
-            push_all_debug("Menu Left", XboxIntegerAction.press_menu_left)
-            
-            
-            push_all_debug("A", XboxIntegerAction.press_a)
-            push_all_debug("X", XboxIntegerAction.press_x)
-            push_all_debug("B", XboxIntegerAction.press_b)
-            push_all_debug("Y", XboxIntegerAction.press_y)
-            push_all_debug("Left Side Button", XboxIntegerAction.press_left_side_button)
-            push_all_debug("Right Side Button", XboxIntegerAction.press_right_side_button)
-            
-            push_all_debug("Release Dpad", XboxIntegerAction.release_dpad)
-            push_all_debug("Arrow North", XboxIntegerAction.press_arrow_north)
-            push_all_debug("Arrow Northeast", XboxIntegerAction.press_arrow_northeast)
-            push_all_debug("Arrow East", XboxIntegerAction.press_arrow_east)
-            push_all_debug("Arrow Southeast", XboxIntegerAction.press_arrow_southeast)
-            push_all_debug("Arrow South", XboxIntegerAction.press_arrow_south)
-            push_all_debug("Arrow Southwest", XboxIntegerAction.press_arrow_southwest)
-            push_all_debug("Arrow West", XboxIntegerAction.press_arrow_west)
-            push_all_debug("Arrow Northwest", XboxIntegerAction.press_arrow_northwest)
-            push_all_debug("Arrow North", XboxIntegerAction.press_arrow_north)
-            push_all_debug("Release Dpad", XboxIntegerAction.release_dpad)
-            push_all_debug("Trigger Left", XboxIntegerAction.set_left_trigger_100)
-            push_all_debug("Trigger Right", XboxIntegerAction.set_right_trigger_100)
-            
-            # trigger 1 0.75 0.5 0.25 0
-            push_all_debug("Trigger Left 0.75", XboxIntegerAction.set_left_trigger_075)
-            push_all_debug("Trigger Right 0.75", XboxIntegerAction.set_right_trigger_075)
-            push_all_debug("Trigger Left 0.5", XboxIntegerAction.set_left_trigger_050)
-            push_all_debug("Trigger Right 0.5", XboxIntegerAction.set_right_trigger_050)
-            push_all_debug("Trigger Left 0.25", XboxIntegerAction.set_left_trigger_025)
-            push_all_debug("Trigger Right 0.25", XboxIntegerAction.set_right_trigger_025)
-            
-            # Left joystick
-            push_all_debug("Left Stick Neutral", XboxIntegerAction.set_left_stick_neutral)
-            push_all_debug("Left Stick Up", XboxIntegerAction.set_left_stick_up)
-            push_all_debug("Left Stick Up Right", XboxIntegerAction.set_left_stick_up_right)
-            push_all_debug("Left Stick Right", XboxIntegerAction.set_left_stick_right)
-            push_all_debug("Left Stick Down Right", XboxIntegerAction.set_left_stick_down_right)
-            push_all_debug("Left Stick Down", XboxIntegerAction.set_left_stick_down)
-            push_all_debug("Left Stick Down Left", XboxIntegerAction.set_left_stick_down_left)
-            push_all_debug("Left Stick Left", XboxIntegerAction.set_left_stick_left)
-            push_all_debug("Left Stick Up Left", XboxIntegerAction.set_left_stick_up_left)
-            push_all_debug("Left Stick Up", XboxIntegerAction.set_left_stick_up)
-            
-            # Right joystick
-            push_all_debug("Right Stick Neutral", XboxIntegerAction.set_right_stick_neutral)
-            push_all_debug("Right Stick Up", XboxIntegerAction.set_right_stick_up)
-            push_all_debug("Right Stick Up Right", XboxIntegerAction.set_right_stick_up_right)
-            push_all_debug("Right Stick Right", XboxIntegerAction.set_right_stick_right)
-            push_all_debug("Right Stick Down Right", XboxIntegerAction.set_right_stick_down_right)
-            push_all_debug("Right Stick Down", XboxIntegerAction.set_right_stick_down)
-            push_all_debug("Right Stick Down Left", XboxIntegerAction.set_right_stick_down_left)
-            push_all_debug("Right Stick Left", XboxIntegerAction.set_right_stick_left)
-            push_all_debug("Right Stick Up Left", XboxIntegerAction.set_right_stick_up_left)
-            push_all_debug("Right Stick Up", XboxIntegerAction.set_right_stick_up)
-            
-            
-            # Left stick 1 0.75 0.5 0.25 0
-            push_all_debug("Left Stick Horizontal 1", XboxIntegerAction.set_left_stick_horizontal_100)
-            push_all_debug("Left Stick Horizontal -1", XboxIntegerAction.set_left_stick_horizontal_neg_100)
-            push_all_debug("Left Stick Vertical 1", XboxIntegerAction.set_left_stick_vertical_100)
-            push_all_debug("Left Stick Vertical -1", XboxIntegerAction.set_left_stick_vertical_neg_100)
-            push_all_debug("Left Stick Horizontal 0.75", XboxIntegerAction.set_left_stick_horizontal_075)
-            push_all_debug("Left Stick Horizontal -0.75", XboxIntegerAction.set_left_stick_horizontal_neg_075)
-            push_all_debug("Left Stick Vertical 0.75", XboxIntegerAction.set_left_stick_vertical_075)
-            push_all_debug("Left Stick Vertical -0.75", XboxIntegerAction.set_left_stick_vertical_neg_075)
-            push_all_debug("Left Stick Horizontal 0.5", XboxIntegerAction.set_left_stick_horizontal_050)
-            push_all_debug("Left Stick Horizontal -0.5", XboxIntegerAction.set_left_stick_horizontal_neg_050)
-            push_all_debug("Left Stick Vertical 0.5", XboxIntegerAction.set_left_stick_vertical_050)
-            push_all_debug("Left Stick Vertical -0.5", XboxIntegerAction.set_left_stick_vertical_neg_050)
-            push_all_debug("Left Stick Horizontal 0.25", XboxIntegerAction.set_left_stick_horizontal_025)
-            push_all_debug("Left Stick Horizontal -0.25", XboxIntegerAction.set_left_stick_horizontal_neg_025)
-            push_all_debug("Left Stick Vertical 0.25", XboxIntegerAction.set_left_stick_vertical_025)
-            push_all_debug("Left Stick Vertical -0.25", XboxIntegerAction.  set_left_stick_vertical_neg_025)
-            
-            
-            # Right stick 1 0.75 0.5 0.25 0
-            push_all_debug("Right Stick Horizontal 1", XboxIntegerAction.set_right_stick_horizontal_100)
-            push_all_debug("Right Stick Horizontal -1", XboxIntegerAction.set_right_stick_horizontal_neg_100)
-            push_all_debug("Right Stick Vertical 1", XboxIntegerAction.set_right_stick_vertical_100)
-            push_all_debug("Right Stick Vertical -1", XboxIntegerAction.set_right_stick_vertical_neg_100)
-            push_all_debug("Right Stick Horizontal 0.75", XboxIntegerAction.set_right_stick_horizontal_075)
-            push_all_debug("Right Stick Horizontal -0.75", XboxIntegerAction.set_right_stick_horizontal_neg_075)
-            push_all_debug("Right Stick Vertical 0.75", XboxIntegerAction.set_right_stick_vertical_075)
-            push_all_debug("Right Stick Vertical -0.75", XboxIntegerAction.set_right_stick_vertical_neg_075)
-            push_all_debug("Right Stick Horizontal 0.5", XboxIntegerAction.set_right_stick_horizontal_050)
-            push_all_debug("Right Stick Horizontal -0.5", XboxIntegerAction.set_right_stick_horizontal_neg_050)
-            push_all_debug("Right Stick Vertical 0.5", XboxIntegerAction.set_right_stick_vertical_050)
-            push_all_debug("Right Stick Vertical -0.5", XboxIntegerAction.set_right_stick_vertical_neg_050)
-            push_all_debug("Right Stick Horizontal 0.25", XboxIntegerAction.set_right_stick_horizontal_025)
-            push_all_debug("Right Stick Horizontal -0.25", XboxIntegerAction.set_right_stick_horizontal_neg_025)
-            push_all_debug("Right Stick Vertical 0.25", XboxIntegerAction.set_right_stick_vertical_025)
-            push_all_debug("Right Stick Vertical -0.25", XboxIntegerAction.set_right_stick_vertical_neg_025)
-            
             
             
             
